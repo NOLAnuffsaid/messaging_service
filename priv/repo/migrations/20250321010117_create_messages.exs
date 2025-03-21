@@ -4,10 +4,13 @@ defmodule MessagingService.Repo.Migrations.CreateMessages do
   def change do
     create table(:messages, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :from, :string
-      add :to, :string
-      add :body, :string
+
       add :attachments, {:array, :string}, null: true
+      add :body, :string
+      add :from, :string
+      add :timestamp, :utc_datetime
+      add :to, :string
+      add :type, :string, null: true
 
       timestamps(type: :utc_datetime)
     end

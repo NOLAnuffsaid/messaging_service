@@ -7,11 +7,7 @@ defmodule MessagingServiceWeb.Router do
 
   scope "/api", MessagingServiceWeb do
     pipe_through :api
-  end
 
-  scope "/hooks", MessagingServiceWeb do
-    pipe_through :api
-
-    post "/sms", MessageController, :send_sms
+    post "/messaging", MessageController, :send_message
   end
 end

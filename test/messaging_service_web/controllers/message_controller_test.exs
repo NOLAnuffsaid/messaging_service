@@ -1,96 +1,242 @@
 defmodule MessagingServiceWeb.MessageControllerTest do
   use MessagingServiceWeb.ConnCase
 
-  import MessagingService.MessagesFixtures
+  import ExUnit.CaptureLog
 
-  alias MessagingService.Messages.Message
-
-  @create_attrs %{
-    body: "some body",
-    to: "some to",
-    from: "some from",
-    attachments: ["option1", "option2"]
-  }
-  @update_attrs %{
-    body: "some updated body",
-    to: "some updated to",
-    from: "some updated from",
-    attachments: ["option1"]
-  }
-  @invalid_attrs %{body: nil, to: nil, from: nil, attachments: nil}
+  # alias MessagingService.Messages.Message
 
   setup %{conn: conn} do
     {:ok, conn: put_req_header(conn, "accept", "application/json")}
   end
 
-  describe "index" do
-    test "lists all messages", %{conn: conn} do
-      conn = get(conn, ~p"/api/messages")
-      assert json_response(conn, 200)["data"] == []
-    end
-  end
+  describe "send_message" do
+    test "SMS - will log errors if phone numbers are invalid", %{conn: conn} do
+      message_params = %{
+        "from" => "+15558675309",
+        "to" => "+105045555555",
+        "type" => "sms",
+        "xillio_id" => "provider-1",
+        "body" => "test message",
+        "attachments" => nil,
+        "timestamp" => DateTime.utc_now()
+      }
 
-  describe "create message" do
-    test "renders message when data is valid", %{conn: conn} do
-      conn = post(conn, ~p"/api/messages", message: @create_attrs)
-      assert %{"id" => id} = json_response(conn, 201)["data"]
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(422)
+        end)
 
-      conn = get(conn, ~p"/api/messages/#{id}")
-
-      assert %{
-               "id" => ^id,
-               "attachments" => ["option1", "option2"],
-               "body" => "some body",
-               "from" => "some from",
-               "to" => "some to"
-             } = json_response(conn, 200)["data"]
-    end
-
-    test "renders errors when data is invalid", %{conn: conn} do
-      conn = post(conn, ~p"/api/messages", message: @invalid_attrs)
-      assert json_response(conn, 422)["errors"] != %{}
-    end
-  end
-
-  describe "update message" do
-    setup [:create_message]
-
-    test "renders message when data is valid", %{conn: conn, message: %Message{id: id} = message} do
-      conn = put(conn, ~p"/api/messages/#{message}", message: @update_attrs)
-      assert %{"id" => ^id} = json_response(conn, 200)["data"]
-
-      conn = get(conn, ~p"/api/messages/#{id}")
-
-      assert %{
-               "id" => ^id,
-               "attachments" => ["option1"],
-               "body" => "some updated body",
-               "from" => "some updated from",
-               "to" => "some updated to"
-             } = json_response(conn, 200)["data"]
+      require IEx
+      IEx.pry()
+      assert result == %{"errors" => %{"to" => ["has invalid format"]}}
+      assert log =~ "Failed to send message!"
     end
 
-    test "renders errors when data is invalid", %{conn: conn, message: message} do
-      conn = put(conn, ~p"/api/messages/#{message}", message: @invalid_attrs)
-      assert json_response(conn, 422)["errors"] != %{}
+    test "SMS - will log errors if either from/to phone number is missing", %{conn: conn} do
+      message_params = %{
+        "from" => nil,
+        "to" => "+15045555555",
+        "type" => "sms",
+        "xillio_id" => "provider-1",
+        "body" => "test message",
+        "attachments" => nil,
+        "timestamp" => DateTime.utc_now()
+      }
+
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(422)
+        end)
+
+      assert result == %{"errors" => %{"from" => ["can't be blank"]}}
+      assert log =~ "Failed to send message!"
     end
-  end
 
-  describe "delete message" do
-    setup [:create_message]
+    test "SMS - will log errors if there are attachments for sms messages", %{conn: conn} do
+      message_params = %{
+        "from" => "+15555045555",
+        "to" => "+15045555555",
+        "type" => "sms",
+        "xillio_id" => "provider-1",
+        "body" => "test message",
+        "attachments" => ["image.png"],
+        "timestamp" => DateTime.utc_now()
+      }
 
-    test "deletes chosen message", %{conn: conn, message: message} do
-      conn = delete(conn, ~p"/api/messages/#{message}")
-      assert response(conn, 204)
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(422)
+        end)
 
-      assert_error_sent 404, fn ->
-        get(conn, ~p"/api/messages/#{message}")
+      assert result == %{"errors" => %{"type" => ["message cannot have attachments"]}}
+      assert log =~ "Failed to send message!"
+    end
+
+    test "SMS - will log success message after sending message", %{conn: conn} do
+      Logger.configure(level: :info)
+
+      message_params = %{
+        "from" => "+13145550504",
+        "to" => "+15045555555",
+        "type" => "sms",
+        "xillio_id" => "provider-1",
+        "body" => "test message",
+        "attachments" => nil,
+        "timestamp" => DateTime.utc_now()
+      }
+
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(200)
+        end)
+
+      assert result["to"] == message_params["to"]
+      assert result["from"] == message_params["from"]
+      assert result["body"] == message_params["body"]
+      assert result["attachments"] == message_params["attachments"]
+      assert result["timestamp"] == format_datetime(message_params["timestamp"])
+
+      assert log =~ "Message sent!"
+    end
+
+    test "MMS -  will log success message after sending message", %{conn: conn} do
+      Logger.configure(level: :info)
+
+      message_params = %{
+        "from" => "+13145550504",
+        "to" => "+15045555555",
+        "type" => "mms",
+        "xillio_id" => "provider1",
+        "body" => "test message",
+        "attachments" => ["image.png", "super_important.pdf"],
+        "timestamp" => DateTime.utc_now()
+      }
+
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(200)
+        end)
+
+      assert result["to"] == message_params["to"]
+      assert result["from"] == message_params["from"]
+      assert result["body"] == message_params["body"]
+      assert result["timestamp"] == format_datetime(message_params["timestamp"])
+
+      for attachment <- result["attachments"] do
+        assert attachment in message_params["attachments"]
       end
+
+      require IEx
+      IEx.pry()
+      assert log =~ "Message sent!"
+    end
+
+    test "Email - will log errors if email address is missing", %{conn: conn} do
+      message_params = %{
+        "from" => "",
+        "to" => "some@person.com",
+        "xillio_id" => "provider-1",
+        "body" => "<h1>Hello Friend!</h1>",
+        "attachments" => [],
+        "timestamp" => DateTime.utc_now()
+      }
+
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(422)
+        end)
+
+      assert result == %{"errors" => %{"from" => ["can't be blank"]}}
+      assert log =~ "Failed to send message!"
+    end
+
+    test "Email - will log errors if email address invalid", %{conn: conn} do
+      message_params = %{
+        "from" => "original*!@some_weird_-company.!*com",
+        "to" => "some@person.com",
+        "xillio_id" => "provider-1",
+        "body" => "<h1>Hello Friend!</h1>",
+        "attachments" => [],
+        "timestamp" => DateTime.utc_now()
+      }
+
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(422)
+        end)
+
+      assert result == %{"errors" => %{"from" => ["has invalid format"]}}
+      assert log =~ "Failed to send message!"
+    end
+
+    test "Email - will log errors if email attachments are null", %{conn: conn} do
+      message_params = %{
+        "from" => "person@a.com",
+        "to" => "some@person.com",
+        "xillio_id" => "provider-1",
+        "body" => "<h1>Hello Friend!</h1>",
+        "attachments" => nil,
+        "timestamp" => DateTime.utc_now()
+      }
+
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(422)
+        end)
+
+      assert result == %{"errors" => %{"attachments" => ["can't be blank"]}}
+      assert log =~ "Failed to send message!"
+    end
+
+    test "Email - will log success message after sending email", %{conn: conn} do
+      message_params = %{
+        "from" => "person@a.com",
+        "to" => "some@person.com",
+        "xillio_id" => "provider-1",
+        "body" => "<h1>Hello Friend!</h1>",
+        "attachments" => [],
+        "timestamp" => DateTime.utc_now()
+      }
+
+      {result, log} =
+        with_log(fn ->
+          conn
+          |> post(~p"/api/messaging", message: message_params)
+          |> json_response(200)
+        end)
+
+      assert result["to"] == message_params["to"]
+      assert result["from"] == message_params["from"]
+      assert result["body"] == message_params["body"]
+      assert result["timestamp"] == format_datetime(message_params["timestamp"])
+
+      for attachment <- result["attachments"] do
+        assert attachment in message_params["attachments"]
+      end
+
+      assert log =~ "Message sent!"
     end
   end
 
-  defp create_message(_) do
-    message = message_fixture()
-    %{message: message}
+  defp format_datetime(%DateTime{} = dt) do
+    dt
+    |> Map.merge(%{microsecond: {0, 0}})
+    |> DateTime.to_iso8601()
   end
 end

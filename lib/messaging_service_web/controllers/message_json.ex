@@ -4,17 +4,18 @@ defmodule MessagingServiceWeb.MessageJSON do
   @doc """
   Renders a list of messages.
   """
-  def received_sms(%{message: message}) do
+  def message(%{message: message}) do
     data(message)
   end
 
-  defp data(%Message{} = message) do
+  defp data(%{"message" => message}) do
     %{
-      id: message.id,
-      from: message.from,
-      to: message.to,
-      body: message.body,
-      attachments: message.attachments
+      attachments: message["attachments"],
+      body: message["body"],
+      from: message["from"],
+      timestamp: message["timestamp"],
+      to: message["to"],
+      xillio_id: message["xillio_id"]
     }
   end
 end
